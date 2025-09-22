@@ -8,7 +8,7 @@ from sklearn.metrics import accuracy_score
 
 from medmnist.info import INFO, DEFAULT_ROOT
 
-Metrics = namedtuple("Metrics", ["AUC", "ACC"])
+Metrics = namedtuple("Metrics", ["AUC", "ACC", "PRE", "REC", "F1", "SPE", "MCC"])
 
 
 class Evaluator:
@@ -46,7 +46,12 @@ class Evaluator:
         task = self.info["task"]
         auc = getAUC(self.labels, y_score, task)
         acc = getACC(self.labels, y_score, task)
-        metrics = Metrics(auc, acc)
+        pre = get_PRE(self.labels, y_score, task)
+        rec = get_REC(self.labels, y_score, task)
+        f1 = get_F1(self.labels, y_score, task)
+        spe = get_SPE(self.labels, y_score, task)
+        mcc = get_MCC(self.labels, y_score, task)
+        metrics = Metrics(auc, acc, pre, rec, f1, spe, mcc)
 
         if save_folder is not None:
             path = os.path.join(
@@ -85,14 +90,14 @@ class Evaluator:
             {flag}{size_flag}_{split}|*|.csv (|*| can be anything)
 
         In a standard evaluation file, we also save the metrics in the filename:
-            {flag}{size_flag}_{split}_[AUC]{auc:.3f}_[ACC]{acc:.3f}@{run}.csv
+            {flag}{size_flag}_{split}_[PRE]{pre:.3f}_[REC]{rec:.3f}_[F1]{f1:.3f}_[SPE]{spe:.3f}_[MCC]{mcc:.3f}@{run}.csv
 
         Here, `size_flag` is blank for 28 images, and `_size` for larger images, e.g., "_64".
 
         In result/evaluation file, each line is (dataset index,float prediction).
 
         For instance,
-        octmnist_test_[AUC]0.672_[ACC]0.892@3.csv
+        octmnist_test_[PRE]0.800_[REC]0.850_[F1]0.820_[SPE]0.900_[MCC]0.750@3.csv
             0,0.125,0.275,0.5,0.2
             1,0.5,0.125,0.275,0.2
         """
@@ -192,6 +197,236 @@ def getACC(y_true, y_score, task, threshold=0.5):
     else:
         ret = accuracy_score(y_true, np.argmax(y_score, axis=-1))
 
+    return ret
+
+
+def get_PRE(y_true, y_score, task, threshold=0.5):
+    """Precision metric.
+    :param y_true: the ground truth labels, shape: (n_samples, n_labels) or (n_samples,) if n_labels==1
+    :param y_score: the predicted score of each class,
+    shape: (n_samples, n_labels) or (n_samples, n_classes) or (n_samples,) if n_labels==1 or n_classes==1
+    :param task: the task of current dataset
+    :param threshold: the threshold for multilabel and binary-class tasks
+    """
+    y_true = y_true.squeeze()
+    y_score = y_score.squeeze()
+
+    if task == "multi-label, binary-class":
+        y_pre = y_score > threshold
+        pre = 0
+        for label in range(y_true.shape[1]):
+            TP = ((y_true[:, label] == 1) & (y_pre[:, label] == 1)).sum()
+            FP = ((y_true[:, label] == 0) & (y_pre[:, label] == 1)).sum()
+            precision = TP / (TP + FP + 1e-6)
+            pre += precision
+        ret = pre / y_true.shape[1]
+    elif task == "binary-class":
+        if y_score.ndim == 2:
+            y_score = y_score[:, -1]
+        else:
+            assert y_score.ndim == 1
+        y_pre = y_score > threshold
+        TP = ((y_true == 1) & (y_pre == 1)).sum()
+        FP = ((y_true == 0) & (y_pre == 1)).sum()
+        ret = TP / (TP + FP + 1e-6)
+    else:
+        pre = 0
+        y_pre = np.argmax(y_score, axis=-1)
+        for i in range(y_score.shape[1]):
+            TP = ((y_true == i) & (y_pre == i)).sum()
+            FP = ((y_true != i) & (y_pre == i)).sum()
+            precision = TP / (TP + FP + 1e-6)
+            pre += precision
+        ret = pre / y_score.shape[1]
+
+    return ret
+
+
+def get_REC(y_true, y_score, task, threshold=0.5):
+    """Recall metric.
+    :param y_true: the ground truth labels, shape: (n_samples, n_labels) or (n_samples,) if n_labels==1
+    :param y_score: the predicted score of each class,
+    shape: (n_samples, n_labels) or (n_samples, n_classes) or (n_samples,) if n_labels==1 or n_classes==1
+    :param task: the task of current dataset
+    :param threshold: the threshold for multilabel and binary-class tasks
+    """
+    y_true = y_true.squeeze()
+    y_score = y_score.squeeze()
+
+    if task == "multi-label, binary-class":
+        y_pre = y_score > threshold
+        rec = 0
+        for label in range(y_true.shape[1]):
+            TP = ((y_true[:, label] == 1) & (y_pre[:, label] == 1)).sum()
+            FN = ((y_true[:, label] == 1) & (y_pre[:, label] == 0)).sum()
+            recall = TP / (TP + FN + 1e-6)
+            rec += recall
+        ret = rec / y_true.shape[1]
+    elif task == "binary-class":
+        if y_score.ndim == 2:
+            y_score = y_score[:, -1]
+        else:
+            assert y_score.ndim == 1
+        y_pre = y_score > threshold
+        TP = ((y_true == 1) & (y_pre == 1)).sum()
+        FN = ((y_true == 1) & (y_pre == 0)).sum()
+        ret = TP / (TP + FN + 1e-6)
+    else:
+        rec = 0
+        y_pre = np.argmax(y_score, axis=-1)
+        for i in range(y_score.shape[1]):
+            TP = ((y_true == i) & (y_pre == i)).sum()
+            FN = ((y_true == i) & (y_pre != i)).sum()
+            recall = TP / (TP + FN + 1e-6)
+            rec += recall
+        ret = rec / y_score.shape[1]
+
+    return ret
+
+
+def get_F1(y_true, y_score, task, threshold=0.5):
+    """F1 metric.
+    :param y_true: the ground truth labels, shape: (n_samples, n_labels) or (n_samples,) if n_labels==1
+    :param y_score: the predicted score of each class,
+    shape: (n_samples, n_labels) or (n_samples, n_classes) or (n_samples,) if n_labels==1 or n_classes==1
+    :param task: the task of current dataset
+    :param threshold: the threshold for multilabel and binary-class tasks
+    """
+    y_true = y_true.squeeze()
+    y_score = y_score.squeeze()
+
+    if task == "multi-label, binary-class":
+        y_pre = y_score > threshold
+        f1 = 0
+        for label in range(y_true.shape[1]):
+            TP = ((y_true[:, label] == 1) & (y_pre[:, label] == 1)).sum()
+            FP = ((y_true[:, label] == 0) & (y_pre[:, label] == 1)).sum()
+            FN = ((y_true[:, label] == 1) & (y_pre[:, label] == 0)).sum()
+            precision = TP / (TP + FP + 1e-6)
+            recall = TP / (TP + FN + 1e-6)
+            f1_label = 2 * precision * recall / (precision + recall + 1e-6)
+            f1 += f1_label
+        ret = f1 / y_true.shape[1]
+    elif task == "binary-class":
+        if y_score.ndim == 2:
+            y_score = y_score[:, -1]
+        else:
+            assert y_score.ndim == 1
+        y_pre = y_score > threshold
+        TP = ((y_true == 1) & (y_pre == 1)).sum()
+        FP = ((y_true == 0) & (y_pre == 1)).sum()
+        FN = ((y_true == 1) & (y_pre == 0)).sum()
+        precision = TP / (TP + FP + 1e-6)
+        recall = TP / (TP + FN + 1e-6)
+        ret = 2 * precision * recall / (precision + recall + 1e-6)
+    else:
+        f1 = 0
+        y_pre = np.argmax(y_score, axis=-1)
+        for i in range(y_score.shape[1]):
+            TP = ((y_true == i) & (y_pre == i)).sum()
+            FP = ((y_true != i) & (y_pre == i)).sum()
+            FN = ((y_true == i) & (y_pre != i)).sum()
+            precision = TP / (TP + FP + 1e-6)
+            recall = TP / (TP + FN + 1e-6)
+            f1_label = 2 * precision * recall / (precision + recall + 1e-6)
+            f1 += f1_label
+        ret = f1 / y_score.shape[1]
+    return ret
+
+
+
+def get_SPE(y_true, y_score, task, threshold=0.5):
+    """Specificity metric.
+    :param y_true: the ground truth labels, shape: (n_samples, n_labels) or (n_samples,) if n_labels==1
+    :param y_score: the predicted score of each class,
+    shape: (n_samples, n_labels) or (n_samples, n_classes) or (n_samples,) if n_labels==1 or n_classes==1
+    :param task: the task of current dataset
+    :param threshold: the threshold for multilabel and binary-class tasks
+    """
+    y_true = y_true.squeeze()
+    y_score = y_score.squeeze()
+
+    if task == "multi-label, binary-class":
+        y_pre = y_score > threshold
+        spec = 0
+        for label in range(y_true.shape[1]):
+            TN = ((y_true[:, label] == 0) & (y_pre[:, label] == 0)).sum()
+            FP = ((y_true[:, label] == 0) & (y_pre[:, label] == 1)).sum()
+            specificity = TN / (TN + FP + 1e-6)
+            spec += specificity
+        ret = spec / y_true.shape[1]
+    elif task == "binary-class":
+        if y_score.ndim == 2:
+            y_score = y_score[:, -1]
+        else:
+            assert y_score.ndim == 1
+        y_pre = y_score > threshold
+        TN = ((y_true == 0) & (y_pre == 0)).sum()
+        FP = ((y_true == 0) & (y_pre == 1)).sum()
+        ret = TN / (TN + FP + 1e-6)
+    else:
+        spec = 0
+        y_pre = np.argmax(y_score, axis=-1)
+        for i in range(y_score.shape[1]):
+            TN = ((y_true != i) & (y_pre != i)).sum()
+            FP = ((y_true != i) & (y_pre == i)).sum()
+            specificity = TN / (TN + FP + 1e-6)
+            spec += specificity
+        ret = spec / y_score.shape[1]
+
+    return ret
+
+
+def get_MCC(y_true, y_score, task, threshold=0.5):
+    """Matthews correlation coefficient metric.
+    :param y_true: the ground truth labels, shape: (n_samples, n_labels) or (n_samples,) if n_labels==1
+    :param y_score: the predicted score of each class,
+    shape: (n_samples, n_labels) or (n_samples, n_classes) or (n_samples,) if n_labels==1 or n_classes==1
+    :param task: the task of current dataset
+    :param threshold: the threshold for multilabel and binary-class tasks
+    """
+    y_true = y_true.squeeze()
+    y_score = y_score.squeeze()
+
+    if task == "multi-label, binary-class":
+        y_pre = y_score > threshold
+        mcc = 0
+        for label in range(y_true.shape[1]):
+            TP = ((y_true[:, label] == 1) & (y_pre[:, label] == 1)).sum()
+            TN = ((y_true[:, label] == 0) & (y_pre[:, label] == 0)).sum()
+            FP = ((y_true[:, label] == 0) & (y_pre[:, label] == 1)).sum()
+            FN = ((y_true[:, label] == 1) & (y_pre[:, label] == 0)).sum()
+            numerator = TP * TN - FP * FN
+            denominator = np.sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)) + 1e-6
+            mcc_label = numerator / denominator
+            mcc += mcc_label
+        ret = mcc / y_true.shape[1]
+    elif task == "binary-class":
+        if y_score.ndim == 2:
+            y_score = y_score[:, -1]
+        else:
+            assert y_score.ndim == 1
+        y_pre = y_score > threshold
+        TP = ((y_true == 1) & (y_pre == 1)).sum()
+        TN = ((y_true == 0) & (y_pre == 0)).sum()
+        FP = ((y_true == 0) & (y_pre == 1)).sum()
+        FN = ((y_true == 1) & (y_pre == 0)).sum()
+        numerator = TP * TN - FP * FN
+        denominator = np.sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)) + 1e-6
+        ret = numerator / denominator
+    else:
+        mcc = 0
+        y_pre = np.argmax(y_score, axis=-1)
+        for i in range(y_score.shape[1]):
+            TP = ((y_true == i) & (y_pre == i)).sum()
+            TN = ((y_true != i) & (y_pre != i)).sum()
+            FP = ((y_true != i) & (y_pre == i)).sum()
+            FN = ((y_true == i) & (y_pre != i)).sum()
+            numerator = TP * TN - FP * FN
+            denominator = np.sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)) + 1e-6
+            mcc_label = numerator / denominator
+            mcc += mcc_label
+        ret = mcc / y_score.shape[1]
     return ret
 
 
