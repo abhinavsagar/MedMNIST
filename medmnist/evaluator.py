@@ -90,14 +90,14 @@ class Evaluator:
             {flag}{size_flag}_{split}|*|.csv (|*| can be anything)
 
         In a standard evaluation file, we also save the metrics in the filename:
-            {flag}{size_flag}_{split}_[AUC]{auc:.3f}_[ACC]{acc:.3f}_[PRE]{pre:.3f}_[REC]{rec:.3f}_[F1]{f1:.3f}_[SPE]{spe:.3f}_[MCC]{mcc:.3f}@{run}.csv
+            {flag}{size_flag}_{split}_[PRE]{pre:.3f}_[REC]{rec:.3f}_[F1]{f1:.3f}_[SPE]{spe:.3f}_[MCC]{mcc:.3f}@{run}.csv
 
         Here, `size_flag` is blank for 28 images, and `_size` for larger images, e.g., "_64".
 
         In result/evaluation file, each line is (dataset index,float prediction).
 
         For instance,
-        octmnist_test_[AUC]0.672_[ACC]0.892_[PRE]0.800_[REC]0.850_[F1]0.820_[SPE]0.900_[MCC]0.750@3.csv
+        octmnist_test_[PRE]0.800_[REC]0.850_[F1]0.820_[SPE]0.900_[MCC]0.750@3.csv
             0,0.125,0.275,0.5,0.2
             1,0.5,0.125,0.275,0.2
         """
@@ -321,7 +321,18 @@ def get_F1(y_true, y_score, task, threshold=0.5):
         ret = 2 * precision * recall / (precision + recall + 1e-6)
     else:
         f1 = 0
-        y_pre = np.argmax(y_score
+        y_pre = np.argmax(y_score, axis=-1)
+        for i in range(y_score.shape[1]):
+            TP = ((y_true == i) & (y_pre == i)).sum()
+            FP = ((y_true != i) & (y_pre == i)).sum()
+            FN = ((y_true == i) & (y_pre != i)).sum()
+            precision = TP / (TP + FP + 1e-6)
+            recall = TP / (TP + FN + 1e-6)
+            f1_label = 2 * precision * recall / (precision + recall + 1e-6)
+            f1 += f1_label
+        ret = f1 / y_score.shape[1]
+    return ret
+
 
 
 def get_SPE(y_true, y_score, task, threshold=0.5):
